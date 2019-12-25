@@ -2,15 +2,18 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -123,6 +126,13 @@ func WebServer() {
 	http.HandleFunc("/js/", ServeResource)
 	http.HandleFunc("/images/", ServeResource)
 
+	//route.HandleFunc("/book/{Name}/{pageAlias}", serveBuyBook)
+	route.HandleFunc("/p/{pageAlias}", GetPopularBooks).Methods("GET")
+	route.HandleFunc("/create/{pageAlias}", wannaCreateBook)
+	route.HandleFunc("/create/books/{pageAlias}", createBook).Methods("POST")
+	route.HandleFunc("/books/{pageAlias}", getAllBooks).Methods("GET")
+	route.HandleFunc("/books/{Name}/{pageAlias}", getBookByName).Methods("GET")
+
 	http.Handle("/", route)
 
 	portNumber := "8088"
@@ -132,3 +142,195 @@ func WebServer() {
 	http.ListenAndServe(":"+portNumber, nil)
 
 }
+
+const (
+	host     = "localhost"
+	port     = 5432
+	user     = "postgres"
+	password = "alex"
+	dbname   = "book_store"
+)
+
+type Book struct {
+	Name   string
+	Author string
+	Price  float32
+	ID     int
+}
+
+func Open() (*sql.DB, error) {
+	dsn := fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslmode=disable",
+		host, port, user, dbname)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	err = db.Ping()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return db, nil
+}
+
+func getBookByName(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	Name := urlParams["Name"]
+	pageAlias := urlParams["pageAlias"]
+
+	Book := getBookByNameFromDb(Name)
+
+	staticPage := staticPages.Lookup(pageAlias)
+
+	if staticPage == nil {
+		staticPage = staticPages.Lookup("404.html")
+		w.WriteHeader(404)
+	}
+
+	staticPage.Execute(w, Book)
+}
+
+func getBookByNameFromDb(name string) Book {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	row := dbase.QueryRow("select * from books where name=$1", name)
+	b := Book{}
+	err := row.Scan(&b.Name, &b.Author, &b.Price, &b.ID)
+	fmt.Println("Scan success")
+	return b
+}
+
+func GetPopularBooks(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+
+	PopularBooks := getPopularBooksFromDb()
+
+	staticPage := staticPages.Lookup(pageAlias)
+
+	if staticPage == nil {
+		staticPage = staticPages.Lookup("404.html")
+		w.WriteHeader(404)
+	}
+
+	staticPage.Execute(w, PopularBooks)
+}
+
+func getPopularBooksFromDb() []Book {
+	dbase, err := Open()
+	if err != nil {
+		panic(err)
+	}
+	defer dbase.Close()
+
+	popularBooks := []Book{}
+
+	rows, err := dbase.Query("select * from \"books\" limit 3")
+	if err != nil {
+		panic(err)
+	}
+
+	t := Book{}
+	for rows.Next() {
+		err := rows.Scan(&t.Name, &t.Author, &t.Price, &t.ID)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		popularBooks = append(popularBooks, t)
+	}
+	return popularBooks
+}
+
+func getAllBooks(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+
+	Books := getAllBooksFromDb()
+	staticPage := staticPages.Lookup(pageAlias)
+	if staticPage == nil {
+		staticPage = staticPages.Lookup("404.html")
+		w.WriteHeader(404)
+	}
+
+	staticPage.Execute(w, Books)
+}
+
+func getAllBooksFromDb() []Book {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	Books := []Book{}
+	rows, err := dbase.Query("select * from books")
+	if err != nil {
+		log.Fatal(err)
+	}
+	b := Book{}
+	for rows.Next() {
+		err := rows.Scan(&b.Name, &b.Author, &b.Price, &b.ID)
+		if err != nil {
+			fmt.Println(err)
+		}
+		Books = append(Books, b)
+	}
+	return Books
+}
+
+func wannaCreateBook(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+	staticPage := staticPages.Lookup(pageAlias)
+	if staticPage == nil {
+		staticPage = staticPages.Lookup("404.html")
+		w.WriteHeader(404)
+	}
+
+	staticPage.Execute(w, nil)
+}
+
+func createBook(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+	price, _ := strconv.ParseFloat(r.FormValue("Price"), 32)
+	book := Book{
+		Name:   r.FormValue("Name"),
+		Author: r.FormValue("Author"),
+		Price:  float32(price),
+	}
+	createdBook := createBookInDb(book)
+	staticPage := staticPages.Lookup(pageAlias)
+	staticPage.Execute(w, createdBook)
+}
+
+func createBookInDb(book Book) Book {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = dbase.Exec("insert into books (name, author, price) values($1, $2, $3);", book.Name, book.Author, book.Price)
+	if err != nil {
+		log.Fatal(err)
+	}
+	row := dbase.QueryRow("select * from books where id=(select max(id) from books)")
+	b := Book{}
+	err = row.Scan(&b.Name, &b.Author, &b.Price, &b.ID)
+	fmt.Println("Scan success")
+	if err != nil {
+		fmt.Println(err)
+	}
+	return b
+}
+
+/*func createBook(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+	json.NewDecoder(r.Body).Decode(&newTask)
+	newBook := createBookInDb()
+
+	task := createBookInDb(newTask)
+	json.NewEncoder(w).Encode(task)
+}
+
+*/

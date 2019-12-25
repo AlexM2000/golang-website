@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]> <html class="no-js lt-ie9 lt-ie8 lt-ie7" lang="en"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js lt-ie9 lt-ie8" lang="en"> <![endif]-->
+<!--[if IE 8]>    <html class="no-js lt-ie9" lang="en"> <![endif]-->
+<!--[if gt IE 8]><!-->
+<html class="no-js" lang="en">
+<!--<![endif]-->
+	<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <link rel="icon" href="images/background_book.jpeg">
+    <link href="https://fonts.googleapis.com/css?family=Crimson+Text&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style2.css">
+    <link rel="stylesheet" href="/css/bootstrap.css">
+    <link rel="stylesheet" href="/css/lightbox.css">
+    <title>Book shop</title>
+    </head>
+	<body>
+         <div class="align-self-start">
+            <a href="/index.html">
+                <img src="/images/random_book1.jpeg" width="100" class="img-fluid m-2">
+            </a>
+        </div>
+    <div class="container-fluid famous-writers pb-5">
+            <!-- title -->
+            <div class="row">
+                <div class="col text-center py-5">
+                    <h2 class="text-secondaty text-uppercase font-italic common-title">
+                        All books avaliable
+                    </h2>
+                </div>
+            </div>
+            <!-- end of the title -->
+            {{range .}}
+                <div class="row text-center book rows-books">
+                    <h4>{{.Name}} {{.Author}} {{.Price}}$</h4>
+                    <a href="/buy.html" class="btn btn-outline-danger">Buy now</a>
+                </div>
+            {{end}}
+     </div>
+</div>
+{{template "footer.html" .}}
