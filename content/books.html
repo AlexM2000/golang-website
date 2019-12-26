@@ -33,11 +33,17 @@
             </div>
             <!-- end of the title -->
             {{range .}}
+                <form id="{{.Name}}form" method="GET" action="/{{.Name}}/book-name.html">
                 <div class="row text-center book rows-books">
                     <h4>{{.Name}} {{.Author}} {{.Price}}$</h4>
-                    <a href="/buy.html" class="btn btn-outline-danger">Buy now</a>
+                    <button type="submit" form="{{.Name}}form" class="btn btn-outline-danger" id="{{.Name}}">Buy now</a>
+                </div>
+                </form>
+            {{else}}
+                <div class="row text-center book rows-books">
+                    <h2 class="text-center">Sorry! No books avaliable</h2>
                 </div>
             {{end}}
      </div>
-</div>
+</div> 
 {{template "footer.html" .}}

@@ -125,6 +125,11 @@ header {
     max-width: 420px;
 }
 
+.book-card-buy{
+    height: 80vh;
+    width: 80vh;
+}
+
 .myborder {
     border-top: 20px solid rgb(150, 164, 170);
 }
@@ -133,4 +138,9 @@ header {
     height: 20vh;
     background: linear-gradient(rgba(0,0,0,.7), rgba(0,0,0,.8)), 
     url("../images/background_book.jpeg") fixed center;
+}
+
+.large {
+    width: 20vh;
+    height: 20vh;
 }
