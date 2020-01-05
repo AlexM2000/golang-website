@@ -1,6 +1,7 @@
 .DS_Store
 .sass-cache
 .codekit-cache
+.vscode
 config.codekit
 config.codekit3
 prepros.cfg

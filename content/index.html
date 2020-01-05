@@ -30,8 +30,24 @@
                     </a>
                 </div>
             </div>
-            
         </div>
+        <div class='page-header'>
+            <div class='btn-toolbar pull-right'>
+                {{if not .Cookie}}
+                <div class='btn-group'>
+                    <a href="users/create-user.html" class='btn btn-primary pull-right'>Sign up</a>
+                    <a href="/login/login.html" class='btn btn-primary pull-right'>Login</a>
+                </div>
+                {{else}}
+                <h1>
+                {{.Cookie}}
+                <a href="logout/index.html" class='btn btn-primary pull-right'>Logout</a>
+                </h1>
+                {{end}}
+            </div>
+            <h2>Header Text</h2>
+        </div>
+        
     </header>
     <!-- End of header -->
 

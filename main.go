@@ -10,10 +10,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/gorilla/sessions"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -24,25 +28,23 @@ func PopulateStaticPages() *template.Template {
 	result := template.New("templates")
 	templatePaths := new([]string)
 
-	basePath := "content"
-	templateFolder, _ := os.Open(basePath)
-	defer templateFolder.Close()
-	templatePathsRaw, _ := templateFolder.Readdir(-1)
+	wg := sync.WaitGroup{}
+	wg.Add(2)
 
-	for _, pathInfo := range templatePathsRaw {
-		log.Println(pathInfo.Name())
-		*templatePaths = append(*templatePaths, basePath+"/"+pathInfo.Name())
+	f := func(basePath string) {
+		templateFolder, _ := os.Open(basePath)
+		defer templateFolder.Close()
+		templatePathsRaw, _ := templateFolder.Readdir(-1)
+		for _, pathInfo := range templatePathsRaw {
+			log.Println(pathInfo.Name())
+			*templatePaths = append(*templatePaths, basePath+"/"+pathInfo.Name())
+		}
+		wg.Done()
 	}
 
-	basePath = "includes"
-	templateFolder, _ = os.Open(basePath)
-	defer templateFolder.Close()
-	templatePathsRaw, _ = templateFolder.Readdir(-1)
-
-	for _, pathInfo := range templatePathsRaw {
-		log.Println(pathInfo.Name())
-		*templatePaths = append(*templatePaths, basePath+"/"+pathInfo.Name())
-	}
+	go f("content")
+	go f("includes")
+	wg.Wait()
 
 	result.ParseFiles(*templatePaths...)
 	return result
@@ -85,9 +87,11 @@ type defaultContext struct {
 	Year        int
 	ErrorMsgs   string
 	SuccessMsgs string
+	Cookie      interface{}
 }
 
 var staticPages = PopulateStaticPages()
+var store = sessions.NewCookieStore([]byte("secret"))
 
 func ServeContent(w http.ResponseWriter, r *http.Request) {
 	urlParams := mux.Vars(r)
@@ -98,21 +102,26 @@ func ServeContent(w http.ResponseWriter, r *http.Request) {
 		pageAlias = "index.html"
 	}
 
-	context := defaultContext{}
-	context.Title = strings.Title(pageAlias)
-	context.Section = pageAlias
-	context.Year = t.Year()
-	context.ErrorMsgs = ""
-	context.SuccessMsgs = ""
+	session, _ := store.Get(r, "session")
+	session.Save(r, w)
+
+	myContext := defaultContext{}
+	myContext.Title = strings.Title(pageAlias)
+	myContext.Section = pageAlias
+	myContext.Year = t.Year()
+	myContext.ErrorMsgs = ""
+	myContext.SuccessMsgs = ""
+	myContext.Cookie = session.Values["login"]
+	fmt.Println(myContext.Cookie)
 
 	staticPage := staticPages.Lookup(pageAlias)
 	if staticPage == nil {
-		context.Title = strings.Title("Whoops!")
+		myContext.Title = strings.Title("Whoops!")
 		staticPage = staticPages.Lookup("404.html")
 		w.WriteHeader(404)
 	}
 
-	staticPage.Execute(w, context)
+	staticPage.Execute(w, myContext)
 }
 
 func updateHTML(w http.ResponseWriter, r *http.Request) {
@@ -142,9 +151,20 @@ func WebServer() {
 	http.HandleFunc("/images/", ServeResource)
 
 	//route.HandleFunc("/book/{Name}/{pageAlias}", serveBuyBook)
+	route.HandleFunc("/users/{pageAlias}", wannaCreateUser)
+	route.HandleFunc("/users/create/{pageAlias}", createUser)
+
 	route.HandleFunc("/p/{pageAlias}", GetPopularBooks).Methods("GET")
-	route.HandleFunc("/create/{pageAlias}", wannaCreateBook)
+
+	route.HandleFunc("/create/{pageAlias}", wannaCreateBook).Methods("GET")
 	route.HandleFunc("/create/books/{pageAlias}", createBook).Methods("POST")
+	route.HandleFunc("/login/{pageAlias}", wannaLogin).Methods("GET")
+	route.HandleFunc("/login/{pageAlias}", Login).Methods("POST")
+	route.HandleFunc("/logout/{pageAlias}", Logout).Methods("GET")
+
+	private := route.PathPrefix("/private").Subrouter()
+	private.Use(authenticateUser)
+
 	route.HandleFunc("/books/{pageAlias}", getAllBooks).Methods("GET")
 	route.HandleFunc("/{Name}/book-name.html", getBookByName).Methods("GET")
 	route.HandleFunc("/{Author}/book-author.html", getBookByAuthor).Methods("GET")
@@ -173,6 +193,11 @@ type Book struct {
 	Price       float32
 	Description string
 	ID          int
+}
+
+type User struct {
+	Email             string
+	EncryptedPassword string
 }
 
 func Open() (*sql.DB, error) {
@@ -264,6 +289,143 @@ func getAllBooksFromDb() []Book {
 		Books = append(Books, b)
 	}
 	return Books
+}
+
+func wannaLogin(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+	staticPage := staticPages.Lookup(pageAlias)
+	if staticPage == nil {
+		staticPage = staticPages.Lookup("404.html")
+		w.WriteHeader(404)
+	}
+
+	staticPage.Execute(w, nil)
+}
+
+func Login(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+	user := User{
+		Email:             r.FormValue("login"),
+		EncryptedPassword: r.FormValue("password"),
+	}
+
+	if ok := loginCheck(user); ok {
+		session, _ := store.Get(r, "session")
+		session.Values["login"] = user.Email
+		session.Save(r, w)
+		staticPage := staticPages.Lookup(pageAlias)
+		staticPage.Execute(w, user.Email)
+	} else {
+		http.Redirect(w, r, "/404.html", 404)
+	}
+}
+
+func Logout(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
+	session.Values["login"] = nil
+	session.Save(r, w)
+	pageAlias := mux.Vars(r)["pageAlias"]
+	http.Redirect(w, r, "/"+pageAlias, http.StatusFound)
+}
+
+func authenticateUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, err := store.Get(r, "session")
+		if err != nil {
+			http.Redirect(w, r, "/404.html", 404)
+			return
+		}
+
+		_, ok := session.Values["login"]
+		if !ok {
+			http.Redirect(w, r, "/404.html", 404)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func loginCheck(user User) bool {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	row := dbase.QueryRow("select encrypted_password from users where login=$1", user.Email)
+	var realPassword string
+	err = row.Scan(&realPassword)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(realPassword)
+	return comparePasswords(realPassword, []byte(user.EncryptedPassword))
+}
+
+func comparePasswords(Pwd string, plainPwd []byte) bool {
+	byteHash := []byte(Pwd)
+	err := bcrypt.CompareHashAndPassword(byteHash, plainPwd)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+
+	return true
+}
+
+func wannaCreateUser(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+	staticPage := staticPages.Lookup(pageAlias)
+	if staticPage == nil {
+		staticPage = staticPages.Lookup("404.html")
+		w.WriteHeader(404)
+	}
+
+	staticPage.Execute(w, nil)
+}
+
+func encryptString(s string) string {
+	b, err := bcrypt.GenerateFromPassword([]byte(s), bcrypt.MinCost)
+	if err != nil {
+		return ""
+	}
+
+	return string(b)
+}
+
+func createUser(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	pageAlias := urlParams["pageAlias"]
+	user := User{
+		Email:             r.FormValue("login"),
+		EncryptedPassword: encryptString(r.FormValue("password")),
+	}
+
+	createdUser := createUserInDb(user)
+
+	staticPage := staticPages.Lookup(pageAlias)
+	staticPage.Execute(w, createdUser.Email)
+}
+
+func createUserInDb(user User) User {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = dbase.Exec("insert into users (login, encrypted_password) values ($1, $2);", user.Email, user.EncryptedPassword)
+	if err != nil {
+		log.Fatal(err)
+	}
+	row := dbase.QueryRow("select login from users where login=$1", user.Email)
+	u := User{}
+	err = row.Scan(&u.Email)
+	fmt.Println("Scan success")
+	if err != nil {
+		fmt.Println(err)
+	}
+	return u
 }
 
 func wannaCreateBook(w http.ResponseWriter, r *http.Request) {
