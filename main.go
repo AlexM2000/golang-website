@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
@@ -39,6 +40,7 @@ func PopulateStaticPages() *template.Template {
 			log.Println(pathInfo.Name())
 			*templatePaths = append(*templatePaths, basePath+"/"+pathInfo.Name())
 		}
+
 		wg.Done()
 	}
 
@@ -103,7 +105,6 @@ func ServeContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, _ := store.Get(r, "session")
-	session.Save(r, w)
 
 	myContext := defaultContext{}
 	myContext.Title = strings.Title(pageAlias)
@@ -112,7 +113,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request) {
 	myContext.ErrorMsgs = ""
 	myContext.SuccessMsgs = ""
 	myContext.Cookie = session.Values["login"]
-	fmt.Println(myContext.Cookie)
+	session.Save(r, w)
 
 	staticPage := staticPages.Lookup(pageAlias)
 	if staticPage == nil {
@@ -158,16 +159,21 @@ func WebServer() {
 
 	route.HandleFunc("/create/{pageAlias}", wannaCreateBook).Methods("GET")
 	route.HandleFunc("/create/books/{pageAlias}", createBook).Methods("POST")
-	route.HandleFunc("/login/{pageAlias}", wannaLogin).Methods("GET")
-	route.HandleFunc("/login/{pageAlias}", Login).Methods("POST")
-	route.HandleFunc("/logout/{pageAlias}", Logout).Methods("GET")
+	route.HandleFunc("/login/{pageAlias}", Login).Methods("GET", "POST")
+	route.HandleFunc("/logout/{pageAlias}", Logout).Methods("POST")
 
-	private := route.PathPrefix("/private").Subrouter()
-	private.Use(authenticateUser)
+	route.HandleFunc("/search/{pageAlias}", Search).Methods("POST")
+
+	//route.Use(authenticateUser)
+
+	//route.HandleFunc("/{BookName}/comments", GetComments).Methods("GET")
+	//route.HandleFunc("/{BookName}/comments", PostComment).Methods("POST")
 
 	route.HandleFunc("/books/{pageAlias}", getAllBooks).Methods("GET")
 	route.HandleFunc("/{Name}/book-name.html", getBookByName).Methods("GET")
 	route.HandleFunc("/{Author}/book-author.html", getBookByAuthor).Methods("GET")
+
+	route.HandleFunc("/test/insert", testInsert)
 
 	http.Handle("/", route)
 
@@ -193,6 +199,13 @@ type Book struct {
 	Price       float32
 	Description string
 	ID          int
+}
+
+type Comment struct {
+	BookName string
+	Email    string
+	Content  string
+	Date     time.Time
 }
 
 type User struct {
@@ -291,62 +304,123 @@ func getAllBooksFromDb() []Book {
 	return Books
 }
 
-func wannaLogin(w http.ResponseWriter, r *http.Request) {
+func Login(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		staticPage := staticPages.Lookup("login.html")
+		if staticPage == nil {
+			staticPage = staticPages.Lookup("404.html")
+			w.WriteHeader(404)
+		}
+		staticPage.Execute(w, nil)
+	} else {
+		user := User{
+			Email:             r.FormValue("login"),
+			EncryptedPassword: r.FormValue("password"),
+		}
+		if ok := loginCheck(user); ok {
+			session, _ := store.Get(r, "session")
+			session.Values["login"] = user.Email
+			session.Save(r, w)
+			http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		} else {
+			http.Redirect(w, r, "/login/login.html", http.StatusMovedPermanently)
+		}
+	}
+}
+
+func Logout(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
+	session.Options.MaxAge = -1
+	session.Save(r, w)
+	pageAlias := mux.Vars(r)["pageAlias"]
+	http.Redirect(w, r, "/"+pageAlias, http.StatusFound)
+}
+
+func Search(w http.ResponseWriter, r *http.Request) {
 	urlParams := mux.Vars(r)
 	pageAlias := urlParams["pageAlias"]
+	r.ParseForm()
+	fmt.Println(r.Form)
+	search := r.FormValue("searchbar")
+	fmt.Println(search)
+	books := SearchInDb(search)
 	staticPage := staticPages.Lookup(pageAlias)
 	if staticPage == nil {
 		staticPage = staticPages.Lookup("404.html")
 		w.WriteHeader(404)
 	}
 
-	staticPage.Execute(w, nil)
+	staticPage.Execute(w, books)
 }
 
-func Login(w http.ResponseWriter, r *http.Request) {
-	urlParams := mux.Vars(r)
-	pageAlias := urlParams["pageAlias"]
-	user := User{
-		Email:             r.FormValue("login"),
-		EncryptedPassword: r.FormValue("password"),
+func testInsert(w http.ResponseWriter, r *http.Request) {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
 	}
-
-	if ok := loginCheck(user); ok {
-		session, _ := store.Get(r, "session")
-		session.Values["login"] = user.Email
-		session.Save(r, w)
-		staticPage := staticPages.Lookup(pageAlias)
-		staticPage.Execute(w, user.Email)
-	} else {
-		http.Redirect(w, r, "/404.html", 404)
+	for i := 0; i < 100; i++ {
+		_, err = dbase.Exec(
+			"insert into books (name, author, price, description) values($1, $2, $3, $4);",
+			RandomString(20), RandomString(20), rand.Intn(100), RandomString(20),
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
+	http.Redirect(w, r, "/", http.StatusOK)
 }
 
-func Logout(w http.ResponseWriter, r *http.Request) {
-	session, _ := store.Get(r, "session")
-	session.Values["login"] = nil
-	session.Save(r, w)
-	pageAlias := mux.Vars(r)["pageAlias"]
-	http.Redirect(w, r, "/"+pageAlias, http.StatusFound)
+func RandomString(n int) string {
+	var letter = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letter[rand.Intn(len(letter))]
+	}
+	return string(b)
 }
 
-func authenticateUser(next http.Handler) http.Handler {
+func SearchInDb(search string) []Book {
+	db, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	books := []Book{}
+	search = "%" + search + "%"
+	rows, err := db.Query(
+		"SELECT name, author, price FROM books WHERE name LIKE $1 or author LIKE $1", search,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	b := Book{}
+	for rows.Next() {
+		err := rows.Scan(&b.Name, &b.Author, &b.Price)
+		if err != nil {
+			fmt.Println(err)
+		}
+		books = append(books, b)
+	}
+	return books
+}
+
+/*func authenticateUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session, err := store.Get(r, "session")
 		if err != nil {
-			http.Redirect(w, r, "/404.html", 404)
+			http.Redirect(w, r, "/404.html", http.StatusMovedPermanently)
 			return
 		}
 
 		_, ok := session.Values["login"]
 		if !ok {
-			http.Redirect(w, r, "/404.html", 404)
+			http.Redirect(w, r, "/login/login.html", http.StatusMovedPermanently)
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
-}
+}*/
 
 func loginCheck(user User) bool {
 	dbase, err := Open()
@@ -357,6 +431,9 @@ func loginCheck(user User) bool {
 	var realPassword string
 	err = row.Scan(&realPassword)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return false
+		}
 		log.Fatal(err)
 	}
 	fmt.Println(realPassword)
@@ -394,6 +471,20 @@ func encryptString(s string) string {
 
 	return string(b)
 }
+
+/*func PostComment(w http.ResponseWriter, r *http.Request) {
+	urlParams := mux.Vars(r)
+	session, _ := store.Get(r, "session")
+	BookName := urlParams["BookName"]
+	comment := Comment{
+		BookName: BookName,
+		Email:    session.Values["login"].(string),
+		Content:  r.FormValue("Content"),
+		Date:     time.Now(),
+	}
+	_, err := PostCommentInDb(comment)
+
+}*/
 
 func createUser(w http.ResponseWriter, r *http.Request) {
 	urlParams := mux.Vars(r)

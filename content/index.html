@@ -41,7 +41,9 @@
                 {{else}}
                 <h1>
                 {{.Cookie}}
-                <a href="logout/index.html" class='btn btn-primary pull-right'>Logout</a>
+                <form class="form-control form-control-lg" method="POST" action="/logout/index.html">
+                    <input class="btn btn-outline-danger" type="submit" value="logout" />
+                </form>
                 </h1>
                 {{end}}
             </div>

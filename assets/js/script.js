@@ -13,12 +13,23 @@ $(document).ready(function() {
             $('.gallery').removeClass('change');
         }
     });
+});
 
-    $('.writers-accordion').click(function(event) {
+function searchFunction() {
+    var input, filter, div, form, a, i;
+    input = document.getElementById('myinput');
+    filter = input.value.toUpperCase();
+    div = document.getElementById('wrapper');
+    form = div.getElementsByTagName('form');
 
-        if (event.target.id.split('-')[0] == "button") {
-            
+    for(i=0 ; i< form.length; i++){
+        a = form[i].getElementsByTagName('a')[0];
+        if(a.innerHTML.toUpperCase().indexOf(filter) > -1){
+            li[i].style.display = "";
         }
 
-    });
-});
+        else{
+            li[i].style.display = 'none';
+        }
+    }
+}

@@ -16,6 +16,11 @@ header {
     clip-path: polygon(0 0, 100% 0 , 100% 93%, 0 100%);
 }
 
+.search {
+    background: linear-gradient(rgba(250, 250, 250, .8), rgba(250, 250, 250, .9)), 
+    url(../images/bgbook5.jpeg) fixed center;
+}
+
 .banner-heading:first-letter {
     font-family: 'Crimson text', serif;
     font-size: 10rem;
@@ -143,4 +148,16 @@ header {
 .large {
     width: 20vh;
     height: 20vh;
+}
+
+.search-bar {
+	position: relative;
+    margin: 0 auto;
+    width: 95%;
+    max-width: 344px;
+    height: 48px;
+    background: #fff;
+    border-radius: 2px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
 }
