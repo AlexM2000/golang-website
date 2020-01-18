@@ -25,7 +25,7 @@
                     <h1 class="text-light display-1 banner-heading"> 
                         We <img src="images/hands_heart.jpeg" width="300" class="img-fluid"> 
                         reading </h1>
-                    <a href="#" class="btn btn-lg btn-outline-warning text-uppercase px-5">
+                    <a href="/p/popular-books.html" class="btn btn-lg btn-outline-warning text-uppercase px-5">
                         Check out
                     </a>
                 </div>
@@ -35,19 +35,19 @@
             <div class='btn-toolbar pull-right'>
                 {{if not .Cookie}}
                 <div class='btn-group'>
-                    <a href="users/create-user.html" class='btn btn-primary pull-right'>Sign up</a>
+                    <a href="users/create-user.html" class='btn btn-primary pull-right'>Sign Up</a>
                     <a href="/login/login.html" class='btn btn-primary pull-right'>Login</a>
                 </div>
                 {{else}}
-                <h1>
+                <h1 class="text-light">
                 {{.Cookie}}
-                <form class="form-control form-control-lg" method="POST" action="/logout/index.html">
-                    <input class="btn btn-outline-danger" type="submit" value="logout" />
+                <form class="form-control form-control-lg form-index" method="POST" action="/logout/index.html">
+                    <input class="btn btn-primary" type="submit" value="logout" />
                 </form>
                 </h1>
                 {{end}}
             </div>
-            <h2>Header Text</h2>
+            <h2 class="text-light">Header Text</h2>
         </div>
         
     </header>

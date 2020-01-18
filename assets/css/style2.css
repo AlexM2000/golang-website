@@ -26,6 +26,12 @@ header {
     font-size: 10rem;
 }
 
+.form-index {
+    background: linear-gradient(rgba(0,0,0,.7), rgba(0,0,0,.8)), 
+    url("../images/background_book.jpeg") fixed center;
+    border-color: rgba(0,0,0,.7);
+}
+
 .banner-heading img {
     animation: beating 2s infinite;
 }
@@ -106,6 +112,10 @@ header {
     height: 100vh;
     background: linear-gradient(rgba(87, 129, 129, 0.3), rgba(85, 110, 110, 0.4)),
     url(../images/bgbook4.jpeg) center;
+}
+
+table {
+    border: 1px solid black;
 }
 
 .books {

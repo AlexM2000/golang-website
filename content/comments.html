@@ -1,0 +1,21 @@
+{{template "header.html" .}}
+<section class="suggested-books">
+<table>
+    {{range .Comments}}
+    <tr>
+        <td>{{.Email}}</td>
+        <td>{{.Date}}</td>
+        <td>{{.Content}}</td>
+    </tr>    
+    {{else}}
+        <div class="row text-center rows-books">
+            <h2 class="text-center">Be first to leave the comment!</h2>
+        </div>
+    {{end}}
+</table>
+    <form class="form-control form-control-lg" method="POST" action="/{{.BookName}}/comments">
+        <textarea class="form-control" rows="5" name="comment" placeholder="Leave a comment"></textarea>
+        <input class="btn btn-outline-danger" type="submit" value="Comment" />
+    </form>
+</section>
+{{template "footer.html" .}}

@@ -89,7 +89,7 @@ type defaultContext struct {
 	Year        int
 	ErrorMsgs   string
 	SuccessMsgs string
-	Cookie      interface{}
+	Cookie      string
 }
 
 var staticPages = PopulateStaticPages()
@@ -112,7 +112,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request) {
 	myContext.Year = t.Year()
 	myContext.ErrorMsgs = ""
 	myContext.SuccessMsgs = ""
-	myContext.Cookie = session.Values["login"]
+	myContext.Cookie = session.Values["login"].(string)
 	session.Save(r, w)
 
 	staticPage := staticPages.Lookup(pageAlias)
@@ -166,8 +166,8 @@ func WebServer() {
 
 	//route.Use(authenticateUser)
 
-	//route.HandleFunc("/{BookName}/comments", GetComments).Methods("GET")
-	//route.HandleFunc("/{BookName}/comments", PostComment).Methods("POST")
+	route.HandleFunc("/{BookName}/comments", GetComments).Methods("GET")
+	route.HandleFunc("/{BookName}/comments", PostComment).Methods("POST")
 
 	route.HandleFunc("/books/{pageAlias}", getAllBooks).Methods("GET")
 	route.HandleFunc("/{Name}/book-name.html", getBookByName).Methods("GET")
@@ -177,7 +177,6 @@ func WebServer() {
 
 	http.Handle("/", route)
 
-	portNumber := "8088"
 	fmt.Println("------------------------------------------------------------")
 	log.Println("Server started at http://localhost:" + portNumber)
 	fmt.Println("------------------------------------------------------------")
@@ -186,11 +185,12 @@ func WebServer() {
 }
 
 const (
-	host     = "localhost"
-	port     = 5432
-	user     = "postgres"
-	password = "alex"
-	dbname   = "book_store"
+	host       = "localhost"
+	port       = 5432
+	user       = "postgres"
+	password   = "alex"
+	dbname     = "book_store"
+	portNumber = "8088"
 )
 
 type Book struct {
@@ -222,7 +222,7 @@ func Open() (*sql.DB, error) {
 	}
 	err = db.Ping()
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	return db, nil
 }
@@ -330,7 +330,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 func Logout(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
-	session.Options.MaxAge = -1
+	session.Values["login"] = ""
 	session.Save(r, w)
 	pageAlias := mux.Vars(r)["pageAlias"]
 	http.Redirect(w, r, "/"+pageAlias, http.StatusFound)
@@ -472,19 +472,117 @@ func encryptString(s string) string {
 	return string(b)
 }
 
-/*func PostComment(w http.ResponseWriter, r *http.Request) {
+func GetComments(w http.ResponseWriter, r *http.Request) {
+	BookName := mux.Vars(r)["BookName"]
+
+	type CommentsPage struct {
+		BookName string
+		Comments []Comment
+		Count    int
+	}
+
+	Comments := GetCommentsFromDb(BookName)
+
+	Page := CommentsPage{
+		BookName: BookName,
+		Comments: Comments,
+		Count:    GetCommentsCountFromDb(),
+	}
+
+	staticPage := staticPages.Lookup("comments.html")
+	if staticPage == nil {
+		staticPage = staticPages.Lookup("404.html")
+		w.WriteHeader(404)
+	}
+
+	staticPage.Execute(w, Page)
+}
+
+func GetCommentsFromDb(BookName string) []Comment {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	rows, err := dbase.Query(
+		"select comments.bookname, comments.email, comments.content, comments.date from comments join books on comments.bookname = books.name",
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		log.Fatal(err)
+	}
+	comments := []Comment{}
+	c := Comment{}
+	for rows.Next() {
+		err := rows.Scan(&c.BookName, &c.Email, &c.Content, &c.Date)
+		if err != nil {
+			fmt.Println(err)
+		}
+		comments = append(comments, c)
+	}
+	return comments
+}
+
+func GetCommentsCountFromDb() int {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	row := dbase.QueryRow(
+		"select count(*) from comments join books on comments.bookname = books.name",
+	)
+	var count int
+	err = row.Scan(&count)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0
+		}
+		log.Fatal(err)
+	}
+	return count
+}
+
+func PostComment(w http.ResponseWriter, r *http.Request) {
 	urlParams := mux.Vars(r)
 	session, _ := store.Get(r, "session")
-	BookName := urlParams["BookName"]
-	comment := Comment{
-		BookName: BookName,
-		Email:    session.Values["login"].(string),
-		Content:  r.FormValue("Content"),
-		Date:     time.Now(),
+	login := session.Values["login"].(string)
+	if login == "" {
+		http.Redirect(w, r, "http://"+host+":"+portNumber+"/login/login.html", http.StatusMovedPermanently)
+	} else {
+		BookName := urlParams["BookName"]
+		comment := Comment{
+			BookName: BookName,
+			Email:    session.Values["login"].(string),
+			Content:  r.FormValue("comment"),
+			Date:     time.Now(),
+		}
+		comment = PostCommentInDb(comment)
+		http.Redirect(w, r, "/"+BookName+"/comments", http.StatusMovedPermanently)
 	}
-	_, err := PostCommentInDb(comment)
+}
 
-}*/
+func PostCommentInDb(comment Comment) Comment {
+	dbase, err := Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = dbase.Exec(
+		"insert into comments values ($1, $2, $3, $4)",
+		comment.BookName, comment.Email, comment.Content, comment.Date,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	row := dbase.QueryRow("select * from comments order by date desc limit 1")
+	err = row.Scan(
+		&comment.BookName, &comment.Email, &comment.Content, &comment.Date,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return comment
+}
 
 func createUser(w http.ResponseWriter, r *http.Request) {
 	urlParams := mux.Vars(r)
