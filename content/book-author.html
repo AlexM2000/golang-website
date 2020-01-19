@@ -5,12 +5,12 @@
             <div class="row">
                 <div class="col text-center py-5">
                     <h2 class="text-secondary text-uppercase font-italic common-title">
-                        {{.Author}}
+                       {{if .Books}} Books by {{.AuthorName}} {{else}} No books from {{.AuthorName}} avaliable {{end}}
                     </h2>
                 </div>
             </div>
             <!-- End of the title -->
-            
+            {{range .Books}}
             <div class="row col-x1-3 col-lg-4 col-sm-8 rotate">
                 <div class="card text-center mb-3 book-card-buy">
                     <div class="card-header">
@@ -39,6 +39,11 @@
 			        </article>
                 </div>
             </div>
+            {{else}}
+                <div class="row text-center book rows-books">
+                    <h2 class="text-center"><a href="/">Return to the main page</a></h2>
+                </div>
+            {{end}}
     </div>
 </section>
 {{template "footer.html" .}}

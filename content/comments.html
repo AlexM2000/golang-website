@@ -4,7 +4,7 @@
     {{range .Comments}}
     <tr>
         <td>{{.Email}}</td>
-        <td>{{.Date}}</td>
+        <td>{{.Date.Format "15:04:05 Jan 02, 2006"}}</td>
         <td>{{.Content}}</td>
     </tr>    
     {{else}}

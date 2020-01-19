@@ -167,13 +167,13 @@ func WebServer() {
 	//route.Use(authenticateUser)
 
 	route.HandleFunc("/{BookName}/comments", GetComments).Methods("GET")
-	route.HandleFunc("/{BookName}/comments", PostComment).Methods("POST")
+	route.HandleFunc("/{BookName}/comments", authenticateUser(PostComment)).Methods("POST")
 
 	route.HandleFunc("/books/{pageAlias}", getAllBooks).Methods("GET")
 	route.HandleFunc("/{Name}/book-name.html", getBookByName).Methods("GET")
 	route.HandleFunc("/{Author}/book-author.html", getBookByAuthor).Methods("GET")
 
-	route.HandleFunc("/test/insert", testInsert)
+	route.HandleFunc("/test/insert/{Count}", testInsert)
 
 	http.Handle("/", route)
 
@@ -304,6 +304,25 @@ func getAllBooksFromDb() []Book {
 	return Books
 }
 
+func authenticateUser(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, err := store.Get(r, "session")
+		if err != nil {
+			http.Redirect(w, r, "/404.html", http.StatusMovedPermanently)
+			return
+		}
+		login, ok := session.Values["login"]
+		if !ok || login.(string) == "" {
+			fmt.Println(r.URL.Path)
+			session.Values["prev_url"] = r.URL.Path
+			session.Save(r, w)
+			http.Redirect(w, r, "/login/login.html", http.StatusMovedPermanently)
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		staticPage := staticPages.Lookup("login.html")
@@ -317,11 +336,17 @@ func Login(w http.ResponseWriter, r *http.Request) {
 			Email:             r.FormValue("login"),
 			EncryptedPassword: r.FormValue("password"),
 		}
+		session, _ := store.Get(r, "session")
+		prevURL := session.Values["prev_url"]
+		fmt.Println(prevURL)
+		if prevURL == nil {
+			prevURL = "/"
+		}
 		if ok := loginCheck(user); ok {
 			session, _ := store.Get(r, "session")
 			session.Values["login"] = user.Email
 			session.Save(r, w)
-			http.Redirect(w, r, "/", http.StatusMovedPermanently)
+			http.Redirect(w, r, prevURL.(string), http.StatusMovedPermanently)
 		} else {
 			http.Redirect(w, r, "/login/login.html", http.StatusMovedPermanently)
 		}
@@ -354,28 +379,41 @@ func Search(w http.ResponseWriter, r *http.Request) {
 }
 
 func testInsert(w http.ResponseWriter, r *http.Request) {
+	Count, _ := strconv.Atoi(mux.Vars(r)["Count"])
+	if Count > 100 {
+		Count = 100
+	}
+
 	dbase, err := Open()
 	if err != nil {
 		log.Fatal(err)
 	}
-	for i := 0; i < 100; i++ {
-		_, err = dbase.Exec(
-			"insert into books (name, author, price, description) values($1, $2, $3, $4);",
-			RandomString(20), RandomString(20), rand.Intn(100), RandomString(20),
-		)
-		if err != nil {
-			log.Fatal(err)
-		}
+
+	wg := sync.WaitGroup{}
+	wg.Add(Count)
+	for i := 0; i < Count; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := dbase.Exec(
+				"insert into books (name, author, price, description) values($1, $2, $3, $4);",
+				RandomString(20), RandomString(20), rand.Intn(100), RandomString(20),
+			)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}()
 	}
-	http.Redirect(w, r, "/", http.StatusOK)
+	wg.Wait()
+
+	http.Redirect(w, r, "/", http.StatusMovedPermanently)
 }
 
-func RandomString(n int) string {
-	var letter = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-	b := make([]rune, n)
+func RandomString(length int) string {
+	charset := "abcdefghijklmnopqrstuvwxyz" +
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	b := make([]byte, length)
 	for i := range b {
-		b[i] = letter[rand.Intn(len(letter))]
+		b[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(b)
 }
@@ -403,24 +441,6 @@ func SearchInDb(search string) []Book {
 	}
 	return books
 }
-
-/*func authenticateUser(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		session, err := store.Get(r, "session")
-		if err != nil {
-			http.Redirect(w, r, "/404.html", http.StatusMovedPermanently)
-			return
-		}
-
-		_, ok := session.Values["login"]
-		if !ok {
-			http.Redirect(w, r, "/login/login.html", http.StatusMovedPermanently)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}*/
 
 func loginCheck(user User) bool {
 	dbase, err := Open()
@@ -486,7 +506,7 @@ func GetComments(w http.ResponseWriter, r *http.Request) {
 	Page := CommentsPage{
 		BookName: BookName,
 		Comments: Comments,
-		Count:    GetCommentsCountFromDb(),
+		Count:    GetCommentsCountFromDb(BookName),
 	}
 
 	staticPage := staticPages.Lookup("comments.html")
@@ -504,7 +524,7 @@ func GetCommentsFromDb(BookName string) []Comment {
 		log.Fatal(err)
 	}
 	rows, err := dbase.Query(
-		"select comments.bookname, comments.email, comments.content, comments.date from comments join books on comments.bookname = books.name",
+		"select comments.* from comments where comments.bookname = $1", BookName,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -524,13 +544,13 @@ func GetCommentsFromDb(BookName string) []Comment {
 	return comments
 }
 
-func GetCommentsCountFromDb() int {
+func GetCommentsCountFromDb(BookName string) int {
 	dbase, err := Open()
 	if err != nil {
 		log.Fatal(err)
 	}
 	row := dbase.QueryRow(
-		"select count(*) from comments join books on comments.bookname = books.name",
+		"select count(*) from comments where comments.bookname = $1", BookName,
 	)
 	var count int
 	err = row.Scan(&count)
@@ -695,7 +715,19 @@ func getBookByAuthor(w http.ResponseWriter, r *http.Request) {
 	urlParams := mux.Vars(r)
 	Name := urlParams["Author"]
 
-	Book := getBookByAuthorFromDb(Name)
+	type CommentsPage struct {
+		AuthorName string
+		Books      []Book
+		Count      int
+	}
+
+	Books := getBookByAuthorFromDb(Name)
+
+	Page := CommentsPage{
+		AuthorName: Name,
+		Books:      Books,
+		Count:      GetCommentsCountFromDb(Name),
+	}
 
 	staticPage := staticPages.Lookup("book-author.html")
 
@@ -704,17 +736,33 @@ func getBookByAuthor(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 	}
 
-	staticPage.Execute(w, Book)
+	staticPage.Execute(w, Page)
 }
 
-func getBookByAuthorFromDb(author string) Book {
+func getBookByAuthorFromDb(author string) []Book {
 	dbase, err := Open()
 	if err != nil {
 		log.Fatal(err)
 	}
-	row := dbase.QueryRow("select * from books where author=$1 ", author)
+
+	rows, err := dbase.Query("select * from books where author=$1 ", author)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		log.Fatal(err)
+	}
+
+	books := []Book{}
 	b := Book{}
-	err = row.Scan(&b.Name, &b.Author, &b.Price, &b.Description, &b.ID)
+	for rows.Next() {
+		err = rows.Scan(&b.Name, &b.Author, &b.Price, &b.Description, &b.ID)
+		if err != nil {
+			log.Fatal(err)
+		}
+		books = append(books, b)
+	}
+
 	fmt.Println("Scan success")
-	return b
+	return books
 }
